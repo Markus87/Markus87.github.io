@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>ATS/ETS2 - Config generator - Sequential gearshifts with clutch</title>
+    <script type="text/javascript">
+        function byId(id) {
+            return document.getElementById(id);
+        }
+        function getInputConfigAsText() {
+            return byId("previewInputConfig").value;
+        }
+        function getInputConfigLines() {
+            return getInputConfigAsText().split("\n");
+        }
+        function getMixPositions() {
+            const lines = getInputConfigLines();
+            const lineOfMix = (mixName) => {
+                var lineNumber = 0;
+                for (const [lineNumber, lineContent] of lines.entries())
+                    if (lineContent.includes(": \"mix " + mixName + " `"))
+                        return lineNumber;
+                return -1;
+            };
+
+            return {
+                lineGear0: lineOfMix("gear0"),
+                lineGear1: lineOfMix("gear1"),
+                lineGear2: lineOfMix("gear2"),
+                lineGear3: lineOfMix("gear3"),
+                lineGear4: lineOfMix("gear4"),
+                lineGear5: lineOfMix("gear5"),
+                lineGear6: lineOfMix("gear6"),
+                lineGear7: lineOfMix("gear7"),
+                lineGearSel1On: lineOfMix("gearsel1on"),
+                lineGearSel1Off: lineOfMix("gearsel1off"),
+                lineGearSel1Tgl: lineOfMix("gearsel1tgl"),
+                lineGearSel2On: lineOfMix("gearsel2on"),
+                lineGearSel2Off: lineOfMix("gearsel2off"),
+                lineGearSel2Tgl: lineOfMix("gearsel2tgl"),
+                lineCurrentGear: lineOfMix(getCurrentGearVariable()),
+                linePreviousGear: lineOfMix(getPreviousGearVariable())
+            };
+        }
+        function checkConfigUploaded(configAsText) {
+            byId("previewInputConfig").value = configAsText;
+
+            let configReady = true;
+            const mixPositions = getMixPositions();
+            let errorText = "";
+            for (const lineKey in mixPositions)
+                if (mixPositions[lineKey] == -1) {
+                    errorText += "Did not find mix \"" + lineKey + "\"\r";
+                    configReady = false;
+                }
+
+            byId("checkConfigReady").checked = configReady;
+            if (configReady)
+                generateConfig();
+            else
+                byId("previewInputConfig").value = errorText;
+        }
+        function configUploaded(e) {
+            const reader = new FileReader();
+            reader.onload = (e) => { checkConfigUploaded(e.target.result); };
+            reader.readAsText(e.target.files[0]);
+        }
+        function onLoad() {
+            byId("inputConfig").addEventListener("change", (e) => { configUploaded(e); });
+            byId("checkConfigReady").checked = false;
+            byId("previewInputConfig").value = "";
+            byId("previewOutputConfig").value = "";
+        }
+
+        function getGearCountForward() {
+            return byId("optionGearCountForward").value.trim();
+        }
+        function getGearCountReverse() {
+            return byId("optionGearCountReverse").value.trim();
+        }
+        function getNeutralButton() {
+            return byId("optionNeutralButton").value.trim();
+        }
+        function hasNeutralButton() {
+            return getNeutralButton().length > 0;
+        }
+        function getCurrentGearVariable() {
+            return byId("optionCurrentGearVariable").value.trim();
+        }
+        function getPreviousGearVariable() {
+            return byId("optionPreviousGearVariable").value.trim();
+        }
+        function getMinimumClutch() {
+            return byId("optionMinimumClutch").value.trim();
+        }
+
+        function getMixCurrentGear() {
+            return "max( min( memory( ( gearup | geardown" + (hasNeutralButton() ? (" | " + getNeutralButton() + "?0 ") : "") + " ) & gt( clutch, " + getMinimumClutch() + " ), sel( " + (hasNeutralButton() ? (getNeutralButton() + "?0") : "0.0") + ", 0.0, " + getPreviousGearVariable() + " + sel( gearup, 1.0, -1.0 ) ) ), " + getGearCountForward() + ".0 ), -" + getGearCountReverse() + ".0 )";
+        }
+        function getMixPreviousGear() {
+            return "memory( !gearup & !geardown, " + getCurrentGearVariable() + " )";
+        }
+        function getMixGear0() {
+            return "( gte( " + getCurrentGearVariable() + ", 0.0 ) & lte( " + getCurrentGearVariable() + ", 0.0 ) )";
+        }
+        function getMixGearSel1On() {
+            const reverseOnFrom = getGearCountReverse() <= 2 ? 2 : 3;
+            const forwardOnFrom = getGearCountForward() <= 12 ? 7 : 13;
+            return "lte( " + getCurrentGearVariable() + ", -" + reverseOnFrom + ".0 ) | gte( " + getCurrentGearVariable() + ", " + forwardOnFrom + ".0 )";
+        }
+        function getMixGearSel1Off() {
+            return "!gearsel1on";
+        }
+        function getMixGearSel1Tgl() {
+            return "semantical.gearsel1tgl?0";
+        }
+        function getMixGearSel2On() {
+            if (getGearCountForward() <= 12 && getGearCountReverse() <= 2)
+                return "semantical.gearsel2on?0";
+            let mix = "";
+            if (getGearCountReverse() > 2)
+                mix += "( gte( " + getCurrentGearVariable() + ", -4.0 ) & lte( " + getCurrentGearVariable() + ", -4.0 ) ) | ( gte( " + getCurrentGearVariable() + ", -2.0 ) & lte( " + getCurrentGearVariable() + ", -2.0 ) )";
+            if (getGearCountForward() > 12)
+                mix += (mix ? " | " : "") + "( gte( " + getCurrentGearVariable() + ",  7.0 ) & lte( " + getCurrentGearVariable() + ", 12.0 ) )";
+            return mix;
+        }
+        function getMixGearSel2Off() {
+            if (getGearCountForward() <= 12 && getGearCountReverse() <= 2)
+                return "semantical.gearsel2off?0";
+            else
+                return "!gearsel2on";
+        }
+        function getMixGearSel2Tgl() {
+            return "semantical.gearsel2tgl?0";
+        }
+        function getMixGear1() {
+            return "( gte( " + getCurrentGearVariable() + ",-" + getGearCountReverse() + ".0 ) & lte( " + getCurrentGearVariable() + ",-1.0 ) )";
+        }
+        function getMixGear2() {
+            return "( gte( " + getCurrentGearVariable() + ", 1.0 ) & lte( " + getCurrentGearVariable() + ", 1.0 ) ) | ( gte( " + getCurrentGearVariable() + ", 7.0 ) & lte( " + getCurrentGearVariable() + ", 7.0 ) ) | ( gte( " + getCurrentGearVariable() + ", 13.0 ) & lte( " + getCurrentGearVariable() + ", 13.0 ) )";
+        }
+        function getMixGear3() {
+            return "( gte( " + getCurrentGearVariable() + ", 2.0 ) & lte( " + getCurrentGearVariable() + ", 2.0 ) ) | ( gte( " + getCurrentGearVariable() + ", 8.0 ) & lte( " + getCurrentGearVariable() + ", 8.0 ) ) | ( gte( " + getCurrentGearVariable() + ", 14.0 ) & lte( " + getCurrentGearVariable() + ", 14.0 ) )";
+        }
+        function getMixGear4() {
+            return "( gte( " + getCurrentGearVariable() + ", 3.0 ) & lte( " + getCurrentGearVariable() + ", 3.0 ) ) | ( gte( " + getCurrentGearVariable() + ", 9.0 ) & lte( " + getCurrentGearVariable() + ", 9.0 ) ) | ( gte( " + getCurrentGearVariable() + ", 15.0 ) & lte( " + getCurrentGearVariable() + ", 15.0 ) )";
+        }
+        function getMixGear5() {
+            return "( gte( " + getCurrentGearVariable() + ", 4.0 ) & lte( " + getCurrentGearVariable() + ", 4.0 ) ) | ( gte( " + getCurrentGearVariable() + ",10.0 ) & lte( " + getCurrentGearVariable() + ",10.0 ) ) | ( gte( " + getCurrentGearVariable() + ", 16.0 ) & lte( " + getCurrentGearVariable() + ", 16.0 ) )";
+        }
+        function getMixGear6() {
+            return "( gte( " + getCurrentGearVariable() + ", 5.0 ) & lte( " + getCurrentGearVariable() + ", 5.0 ) ) | ( gte( " + getCurrentGearVariable() + ",11.0 ) & lte( " + getCurrentGearVariable() + ",11.0 ) ) | ( gte( " + getCurrentGearVariable() + ", 17.0 ) & lte( " + getCurrentGearVariable() + ", 17.0 ) )";
+        }
+        function getMixGear7() {
+            return "( gte( " + getCurrentGearVariable() + ", 6.0 ) & lte( " + getCurrentGearVariable() + ", 6.0 ) ) | ( gte( " + getCurrentGearVariable() + ",12.0 ) & lte( " + getCurrentGearVariable() + ",12.0 ) ) | ( gte( " + getCurrentGearVariable() + ", 18.0 ) & lte( " + getCurrentGearVariable() + ", 18.0 ) )";
+        }
+
+        function getChangedLines(originalLines, updatedLines) {
+            if (originalLines.length != updatedLines.length)
+                return "";
+            let changedLines = "";
+            for (let lineNumber = 0; lineNumber < originalLines.length; lineNumber += 1) {
+                const originalLineContent = originalLines[lineNumber];
+                const updatedLineContent = updatedLines[lineNumber];
+                console.log(originalLineContent)
+                console.log(updatedLineContent)
+                if (originalLineContent != updatedLineContent)
+                    changedLines += updatedLineContent + "\n";
+            }
+            if (!changedLines)
+                changedLines = "No changes";
+            return changedLines;
+        }
+        function generateConfig() {
+            const originalConfigLines = getInputConfigLines();
+            let updatedConfigLines = Array.from(originalConfigLines);
+            const mixPositions = getMixPositions();
+
+            const modifyMix = (lineNumber, newMix) => {
+                const originalLineContent = updatedConfigLines[lineNumber];
+                let offsetBegin = originalLineContent.search("`");
+                if (offsetBegin < 0)
+                    return;
+                offsetBegin += 1;
+                const keptBegin = originalLineContent.substring(0, offsetBegin);
+                updatedConfigLines[lineNumber] = keptBegin + newMix + "`\"";
+            };
+
+            modifyMix(mixPositions.lineCurrentGear, getMixCurrentGear());
+            modifyMix(mixPositions.linePreviousGear, getMixPreviousGear());
+            modifyMix(mixPositions.lineGear0, getMixGear0());
+            modifyMix(mixPositions.lineGearSel1On, getMixGearSel1On());
+            modifyMix(mixPositions.lineGearSel1Off, getMixGearSel1Off());
+            modifyMix(mixPositions.lineGearSel1Tgl, getMixGearSel1Tgl());
+            modifyMix(mixPositions.lineGearSel2On, getMixGearSel2On());
+            modifyMix(mixPositions.lineGearSel2Off, getMixGearSel2Off());
+            modifyMix(mixPositions.lineGearSel2Tgl, getMixGearSel2Tgl());
+            modifyMix(mixPositions.lineGear1, getMixGear1());
+            modifyMix(mixPositions.lineGear2, getMixGear2());
+            modifyMix(mixPositions.lineGear3, getMixGear3());
+            modifyMix(mixPositions.lineGear4, getMixGear4());
+            modifyMix(mixPositions.lineGear5, getMixGear5());
+            modifyMix(mixPositions.lineGear6, getMixGear6());
+            modifyMix(mixPositions.lineGear7, getMixGear7());
+
+            let outputConfig = "";
+            for (const lineContent of updatedConfigLines)
+                outputConfig += lineContent + "\n";
+
+            const generatedConfig = outputConfig.substring(0, outputConfig.length - 1).replaceAll("\n", "\r\n");
+            byId("previewOutputConfig").value = generatedConfig;
+            byId("previewChangesConfig").value = getChangedLines(originalConfigLines, updatedConfigLines);
+            return generatedConfig;
+        }
+        function downloadConfiguration() {
+            const downloadDummy = byId("downloadDummy");
+            downloadDummy.href = "data:text/plain," + encodeURI(generateConfig());
+            downloadDummy.download = "controls.sii";
+            downloadDummy.click();
+        }
+    </script>
+</head>
+
+<style>
+    table,
+    th,
+    td {
+        border: 1px solid lightgray;
+    }
+</style>
+
+<body onload="onLoad()">
+    <div>
+        <h3>1. Configure inputs in the game</h3>
+        <ul>
+            <li>Clutch axis</li>
+            <li>Transmission = H-Shifter</li>
+            <li>Shifterlayout = Range</li>
+            <li>Shifterlayoutbehavior = Simple + Warning</li>
+            <li>Define <b>Shift up</b> + <b>Shift down</b> buttons</li>
+        </ul>
+    </div>
+    <div>
+        <h3>2. Options</h3>
+        <div style="left: 1em;position:relative;">
+            <table>
+                <tr>
+                    <td><label>Gear count forward: </label></td>
+                    <td><input id="optionGearCountForward" value="12" style="width:5em;" /></td>
+                    <td rowspan="2">Important</td>
+                    <td>The amount of gears your gearbox has for going forward (6-18)</td>
+                </tr>
+                <tr>
+                    <td><label>Gear count reverse: </label></td>
+                    <td><input id="optionGearCountReverse" value="2" style="width:5em;" /></td>
+                    <td>The amount of gears your gearbox has for going back(1-4)</td>
+                </tr>
+                <tr>
+                    <td><label>Neutral button:</label></td>
+                    <td><input id="optionNeutralButton" value="" style="width:5em;" /></td>
+                    <td>Optional</td>
+                    <td>F.e.: "joy.b4" / "empty" => disabled</td>
+                </tr>
+                <tr>
+                    <td><label>Current gear variable:</label></td>
+                    <td><input id="optionCurrentGearVariable" value="hmdx" style="width:5em;" /></td>
+                    <td rowspan="3">Modifiable</td>
+                    <td rowspan="2">"hmdx" and "hmdy" would be used (best guess) for vr-headsets, if you use a vr
+                        headset you must pick other "analog" mix lines ("eyegazex" and "eyegazey" seem likely
+                        candidates, eyetracker?)</td>
+                </tr>
+                <tr>
+                    <td><label>Previous gear variable:</label></td>
+                    <td><input id="optionPreviousGearVariable" value="hmdy" style="width:5em;" /></td>
+                </tr>
+                <tr>
+                    <td><label>Minimum clutch for gearchange:</label></td>
+                    <td><input id="optionMinimumClutch" value="0.75" style="width:5em;" /></td>
+                    <td>Default "0.75" means shifting is enabled once the clutch is pressed to at least 75%, this was
+                        the value when ets2 really shifted gears</td>
+                </tr>
+                </tr>
+            </table>
+        </div>
+    </div>
+    <div>
+        <h3>3. Upload controls settings file</h3>
+        <div style="left: 1em;position:relative;">
+            <p>
+                You may find your configuration here: <br />
+            <table>
+                <tr>
+                    <td rowspan="2">Euro Truck Simulator 2</td>
+                    <td>Windows</td>
+                    <td>
+                        <font style="color:green;font-family: monospace;">%USERPROFILE%\Documents\Euro Truck Simulator
+                            2\profiles\<font style="color:orange;">&lt;Profile ID&gt;</font>\controls.sii</font>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Linux</td>
+                    <td>
+                        <font style="color:green;font-family: monospace;">~/.local/share/Euro Truck Simulator
+                            2/profiles/<font style="color:orange;">&lt;Profile ID&gt;</font>/controls_linux.sii
+                    </td>
+                </tr>
+                <tr>
+                    <td rowspan="2">American Truck Simulator</td>
+                    <td>Windows</td>
+                    <td>
+                        <font style="color:green;font-family: monospace;">%USERPROFILE%\Documents\American Truck
+                            Simulator\profiles\<font style="color:orange;">&lt;Profile ID&gt;</font>\controls.sii</font>
+                    </td>
+                </tr>
+                <tr>
+                    <td>Linux</td>
+                    <td>
+                        <font style="color:green;font-family: monospace;">~/.local/share/American Truck
+                            Simulator/profiles/<font style="color:orange;">&lt;Profile ID&gt;</font>/controls_linux.sii
+                    </td>
+                </tr>
+            </table>
+            <br />
+            <div
+                style="color:yellow;border-color: yellow;background-color: black;padding: 5mm;font-weight: bold;width:fit-content">
+                Backup your configuration in case we mess up!</div>
+            </p>
+            <input id="checkConfigReady" type="checkbox" disabled="true" />
+            <input id="inputConfig" type="file" accept=".sii" onchange="configUploaded" />
+            <div>
+                <h4>Uploaded config preview</h4>
+                <textarea id="previewInputConfig" readonly="true"
+                    style="font-family: monospace;overflow:scroll;height:10em;width:90%"></textarea>
+            </div>
+        </div>
+    </div>
+    <div>
+        <h3>4. Generated config</h3>
+        <div style="left: 1em;position:relative;">
+            <p>
+                Download the updated configuration file and replace the original.<br />
+                Start the game and check if it worked.
+            </p>
+            <button id="buttonUpdateConfig" onclick="generateConfig()">Generate</button>
+            <button id="buttonDownloadConfig" onclick="downloadConfiguration()">Download</button>
+            <a id="downloadDummy" style="visibility: hidden;"></a>
+            <br />
+            <br />
+            <details>
+                <summary>View modified lines</summary>
+                <textarea id="previewChangesConfig" readonly="true"
+                    style="font-family: monospace;overflow:scroll;height:10em;width:90%"></textarea>
+            </details>
+            <br />
+            Preview generated config:<br />
+            <textarea id="previewOutputConfig" readonly="true"
+                style="font-family: monospace;overflow:scroll;height:10em;width:90%"></textarea>
+        </div>
+    </div>
+</body>
+
+</html>
